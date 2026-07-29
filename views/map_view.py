@@ -23,6 +23,7 @@ from utils.config import (
     DATI_FONTE_LABEL,
     HIT_TEST_METRI,
     LABEL_ALTRO,
+    LABEL_NASCONDI_PERCORSO,
     MAPPA_CENTRO_LAT,
     MAPPA_CENTRO_LON,
     MAPPA_ZOOM_DETTAGLIO,
@@ -95,6 +96,7 @@ class MappaController:
         self.livello_percorso = PolylineLayer(polylines=[])
         self._dialog: ft.AlertDialog | None = None
         self._route_corrente: RouteResult | None = None
+        self._scuola_percorso_nome: str = ""
 
         self.livello_mappa = TileLayer(
             url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -127,11 +129,64 @@ class MappaController:
             color=UI_META_COLOR,
         )
 
+        self._banner_titolo = ft.Text(
+            "",
+            size=15,
+            weight=ft.FontWeight.W_700,
+            color=UI_TITLE_COLOR,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        self._banner_dettaglio = ft.Text(
+            "",
+            size=14,
+            color=UI_META_COLOR,
+            max_lines=2,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        self.banner_percorso = ft.Container(
+            visible=False,
+            padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+            bgcolor=UI_ACCENT_SOFT,
+            border=ft.Border.only(
+                top=ft.BorderSide(1, UI_BORDER),
+                bottom=ft.BorderSide(1, UI_BORDER),
+            ),
+            content=ft.Row(
+                spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Container(
+                        width=44,
+                        height=44,
+                        bgcolor=UI_HEADER_BG,
+                        border_radius=22,
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Icon(ft.Icons.ROUTE, color=UI_SURFACE, size=22),
+                    ),
+                    ft.Column(
+                        expand=True,
+                        spacing=4,
+                        tight=True,
+                        controls=[self._banner_titolo, self._banner_dettaglio],
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE,
+                        icon_size=22,
+                        icon_color=UI_META_COLOR,
+                        tooltip=LABEL_NASCONDI_PERCORSO,
+                        on_click=lambda _e: self.nascondi_percorso(),
+                    ),
+                ],
+            ),
+        )
+
         self.root = ft.Column(
             expand=True,
             spacing=0,
             controls=[
                 self.mappa,
+                self.banner_percorso,
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=12, vertical=6),
                     bgcolor=UI_SURFACE,
@@ -244,11 +299,36 @@ class MappaController:
         if self.on_percorso_visibile is not None:
             self.on_percorso_visibile(visibile)
 
+    def _aggiorna_banner_percorso(self, route: RouteResult | None) -> None:
+        if route is None or len(route.coordinate) < 2:
+            self.banner_percorso.visible = False
+            self._banner_titolo.value = ""
+            self._banner_dettaglio.value = ""
+            return
+
+        label_prof = _PROFILO_LABEL.get(route.profilo, route.profilo)
+        destinazione = self._scuola_percorso_nome or "Scuola"
+        self._banner_titolo.value = f"Percorso → {destinazione}"
+
+        if route.sorgente == "osrm":
+            stima = " · durata stimata" if route.durata_stimata else ""
+            self._banner_dettaglio.value = (
+                f"{label_prof} · {format_distanza(route.distanza_m)}"
+                f" · {format_durata(route.durata_s)}{stima}"
+            )
+        else:
+            self._banner_dettaglio.value = (
+                f"Routing non disponibile — stima {label_prof}: "
+                f"{format_distanza(route.distanza_m)} · ~{format_durata(route.durata_s)}"
+            )
+        self.banner_percorso.visible = True
+
     def mostra_percorso(self, route: RouteResult | None) -> None:
         """Disegna (o rimuove) la polilinea del percorso sulla mappa."""
         self._route_corrente = route
         if route is None or len(route.coordinate) < 2:
             self.livello_percorso.polylines = []
+            self._scuola_percorso_nome = ""
         else:
             self.livello_percorso.polylines = [
                 PolylineMarker(
@@ -261,6 +341,7 @@ class MappaController:
                     border_color=ft.Colors.WHITE,
                 )
             ]
+        self._aggiorna_banner_percorso(route)
         self._notifica_percorso_visibile()
 
     def nascondi_percorso(self) -> None:
@@ -295,28 +376,12 @@ class MappaController:
         self.page.update()
 
     async def calcola_percorso_scuola(self, scuola: dict) -> None:
-        """On-demand: calcola OSRM, disegna la traccia e lascia la mappa libera."""
+        """On-demand: calcola OSRM, disegna la traccia e mostra riepilogo fisso."""
         lat = float(scuola["Latitudine"])
         lon = float(scuola["Longitudine"])
+        self._scuola_percorso_nome = str(scuola.get("Nome", "") or "Scuola")
         route = await self._fetch_route(lat, lon)
         self.mostra_percorso(route)
-
-        label_prof = _PROFILO_LABEL.get(route.profilo, route.profilo)
-        if route.sorgente == "osrm":
-            suffix = " (durata stimata)" if route.durata_stimata else ""
-            msg = (
-                f"Percorso ({label_prof}): {format_distanza(route.distanza_m)}"
-                f" · {format_durata(route.durata_s)}{suffix}"
-            )
-        else:
-            msg = (
-                f"Routing non disponibile — stima "
-                f"{format_distanza(route.distanza_m)} · ~{format_durata(route.durata_s)}"
-            )
-
-        self.page.show_dialog(
-            ft.SnackBar(content=ft.Text(msg, max_lines=2), duration=4500)
-        )
         self.page.update()
 
     def mostra_scuola(

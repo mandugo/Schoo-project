@@ -114,9 +114,10 @@ def crea_info_view(*, on_torna: Callable[[], None] | None = None) -> ft.Containe
             "Percorso e indicazioni",
             "Nel dialog scuola scegli la modalità (a piedi, bici, auto) e premi "
             "«Mostra percorso» per tracciare il percorso sulla mappa (OSRM).",
+            "Sotto la mappa resta un riquadro con distanza e tempo finché il percorso "
+            "è attivo; puoi chiuderlo da lì o con «Nascondi percorso» nell’header.",
             "«Indicazioni» apre Google Maps con partenza da casa e destinazione la scuola.",
-            "Il percorso non parte al solo click: va richiesto esplicitamente. "
-            "Nascondi percorso (header o dialog) rimuove la traccia.",
+            "Il percorso non parte al solo click: va richiesto esplicitamente.",
         ),
         _sezione(
             "Condivisione",
