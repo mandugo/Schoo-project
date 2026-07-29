@@ -1,4 +1,0 @@
-flet==0.86.4
-flet-map==0.86.4
-pandas
-geopy
