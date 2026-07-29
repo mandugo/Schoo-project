@@ -1,3 +1,10 @@
+"""
+Script one-shot: assegna la colonna Grado al CSV scuole e lo riscrive.
+Non è usato a runtime dall'app — eseguirlo solo se serve rigenerare i gradi.
+
+    python data/crea_gradi_scuole.py
+"""
+
 import pandas as pd
 
 
