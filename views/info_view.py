@@ -99,8 +99,12 @@ def crea_info_view(*, on_torna: Callable[[], None] | None = None) -> ft.Containe
             "Risultati e mappa",
             "La mini-lista a sinistra mostra fino a 12 risultati; clicca una scuola "
             "per centrare la mappa e aprire i dettagli.",
+            "Aprendo una scuola e mostrando il percorso, i marker dello stesso "
+            "distretto restano in evidenza e gli altri si attenuano; nascondendo "
+            "il percorso tutto torna normale.",
             "Puoi anche toccare un marker sulla mappa (o l’area vicino al punto). "
-            "I colori dei marker seguono il distretto (vedi legenda in Distretti).",
+            "Ogni marker mostra il numero di distretto e un colore univoco "
+            "(vedi legenda in Distretti).",
         ),
         _sezione(
             "Casa e distanze",

@@ -49,21 +49,49 @@ from utils.database import statistiche_dataset
 from utils.geo import distanza_metri, format_distanza
 from utils.routing import RouteResult, calcola_percorso, format_durata
 
-COLORI_DISTRETTO = [
-    "#C45C26",
-    "#2E6B9E",
-    "#1B7A6E",
-    "#A67C00",
-    "#8B4513",
-    "#3D7A5A",
-    "#B85C38",
-    "#4A6FA5",
-]
+# Palette ampia (≥31) — hue a angolo aureo + luminosità/saturazione alternate
+def _hsl_to_hex(h: float, s: float, lightness: float) -> str:
+    """h in [0,360), s/l in [0,1] → #RRGGBB."""
+    h = h % 360.0
+    c = (1 - abs(2 * lightness - 1)) * s
+    x = c * (1 - abs((h / 60.0) % 2 - 1))
+    m = lightness - c / 2
+    if h < 60:
+        r, g, b = c, x, 0.0
+    elif h < 120:
+        r, g, b = x, c, 0.0
+    elif h < 180:
+        r, g, b = 0.0, c, x
+    elif h < 240:
+        r, g, b = 0.0, x, c
+    elif h < 300:
+        r, g, b = x, 0.0, c
+    else:
+        r, g, b = c, 0.0, x
+    return "#{:02X}{:02X}{:02X}".format(
+        int(round((r + m) * 255)),
+        int(round((g + m) * 255)),
+        int(round((b + m) * 255)),
+    )
+
+
+def _genera_palette_distretti(n: int = 36) -> list[str]:
+    colori: list[str] = []
+    for i in range(n):
+        h = (i * 137.508) % 360.0
+        s = 0.58 + (i % 3) * 0.10
+        lightness = 0.36 + (i % 2) * 0.10 + ((i // 3) % 2) * 0.04
+        colori.append(_hsl_to_hex(h, min(s, 0.82), min(lightness, 0.52)))
+    return colori
+
+
+COLORI_DISTRETTO = _genera_palette_distretti(36)
 
 _PROFILO_LABEL = dict(ROUTING_PROFILI)
 
 
 def mappa_colori_distretto(distretti: list[int]) -> dict[int, Any]:
+    """Assegna un colore univoco per distretto (cicla solo oltre la palette)."""
     return {
         d: COLORI_DISTRETTO[i % len(COLORI_DISTRETTO)]
         for i, d in enumerate(sorted(distretti))
@@ -97,6 +125,9 @@ class MappaController:
         self._dialog: ft.AlertDialog | None = None
         self._route_corrente: RouteResult | None = None
         self._scuola_percorso_nome: str = ""
+        self._mostra_casa = True
+        self._distretto_evidenziato: int | None = None
+        self._codice_selezionato: str | None = None
 
         self.livello_mappa = TileLayer(
             url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -208,31 +239,108 @@ class MappaController:
             int(distretto), COLORI_DISTRETTO[int(distretto) % len(COLORI_DISTRETTO)]
         )
 
+    def _ruolo_marker(self, scuola: dict) -> str:
+        """normale | dimmed | stesso | selezionato — in base al dialog aperto."""
+        if self._distretto_evidenziato is None:
+            return "normale"
+        codice = str(scuola.get("Codice", "") or "")
+        if self._codice_selezionato and codice == self._codice_selezionato:
+            return "selezionato"
+        try:
+            d = int(scuola["Distretto"])
+        except (KeyError, TypeError, ValueError):
+            return "dimmed"
+        if d == self._distretto_evidenziato:
+            return "stesso"
+        return "dimmed"
+
     def _marker_scuola(self, colore: Any, scuola: dict) -> ft.Control:
+        ruolo = self._ruolo_marker(scuola)
+        try:
+            label = str(int(scuola["Distretto"]))
+        except (KeyError, TypeError, ValueError):
+            label = "?"
+
+        if ruolo == "selezionato":
+            size = MARKER_SCUOLA_SIZE + 10
+            border_w = 3.0
+            text_size = 13
+            opacity = 1.0
+            shadow_blur = 10
+            shadow_op = 0.4
+            bgcolor = UI_SURFACE
+            text_color = colore
+            border_color = colore
+        elif ruolo == "stesso":
+            size = MARKER_SCUOLA_SIZE + 4
+            border_w = 2.5
+            text_size = 12
+            opacity = 1.0
+            shadow_blur = 8
+            shadow_op = 0.32
+            bgcolor = ft.Colors.with_opacity(0.95, UI_SURFACE)
+            text_color = colore
+            border_color = colore
+        elif ruolo == "dimmed":
+            size = MARKER_SCUOLA_SIZE - 2
+            border_w = 1.5
+            text_size = 10
+            opacity = 0.28
+            shadow_blur = 2
+            shadow_op = 0.1
+            bgcolor = UI_SURFACE
+            text_color = ft.Colors.with_opacity(0.55, colore)
+            border_color = ft.Colors.with_opacity(0.45, colore)
+        else:
+            size = MARKER_SCUOLA_SIZE
+            border_w = 2.0
+            text_size = 11
+            opacity = 1.0
+            shadow_blur = 5
+            shadow_op = 0.28
+            bgcolor = UI_SURFACE
+            text_color = colore
+            border_color = colore
+
         return ft.GestureDetector(
             on_tap=lambda e, s=scuola: self.page.run_task(self.seleziona_scuola, s),
             content=ft.Container(
-                width=MARKER_SCUOLA_SIZE + 6,
-                height=MARKER_SCUOLA_SIZE + 6,
+                width=size,
+                height=size,
                 alignment=ft.Alignment.CENTER,
-                bgcolor=UI_SURFACE,
-                border=ft.Border.all(2, colore),
-                border_radius=(MARKER_SCUOLA_SIZE + 6) / 2,
+                opacity=opacity,
+                bgcolor=bgcolor,
+                border=ft.Border.all(border_w, border_color),
+                border_radius=size / 2,
                 shadow=ft.BoxShadow(
-                    blur_radius=5,
-                    color=ft.Colors.with_opacity(0.28, ft.Colors.BLACK),
+                    blur_radius=shadow_blur,
+                    color=ft.Colors.with_opacity(shadow_op, ft.Colors.BLACK),
                     offset=ft.Offset(0, 1),
                 ),
-                content=ft.Icon(
-                    ft.Icons.SCHOOL,
-                    color=colore,
-                    size=MARKER_SCUOLA_SIZE - 4,
+                content=ft.Text(
+                    label,
+                    size=text_size,
+                    weight=ft.FontWeight.W_700,
+                    color=text_color,
+                    text_align=ft.TextAlign.CENTER,
                 ),
             ),
         )
 
     def aggiorna_marker(self, df: pd.DataFrame, mostra_casa: bool = True) -> None:
         self.df_corrente = df.copy()
+        self._mostra_casa = mostra_casa
+
+        # Se la scuola evidenziata non è più nei risultati, spegni l'effetto
+        if self._codice_selezionato and len(df):
+            presenti = set(df["Codice"].astype(str))
+            if self._codice_selezionato not in presenti:
+                self._distretto_evidenziato = None
+                self._codice_selezionato = None
+        elif self._codice_selezionato and len(df) == 0:
+            self._distretto_evidenziato = None
+            self._codice_selezionato = None
+
         distretti = sorted(df["Distretto"].astype(int).unique().tolist()) if len(df) else []
         for d in distretti:
             if d not in self.colore_distretto:
@@ -286,6 +394,18 @@ class MappaController:
 
         self.livello_marker.markers = markers
 
+    def _imposta_evidenza_distretto(
+        self,
+        distretto: int | None,
+        codice: str | None = None,
+    ) -> None:
+        self._distretto_evidenziato = (
+            int(distretto) if distretto is not None else None
+        )
+        self._codice_selezionato = str(codice) if codice else None
+        if len(self.df_corrente):
+            self.aggiorna_marker(self.df_corrente, mostra_casa=self._mostra_casa)
+
     def avvia_imposta_casa(self) -> None:
         """Prossimo tap sulla mappa imposta le coordinate di casa."""
         self._mode_imposta_casa = True
@@ -329,6 +449,8 @@ class MappaController:
         if route is None or len(route.coordinate) < 2:
             self.livello_percorso.polylines = []
             self._scuola_percorso_nome = ""
+            # Senza percorso: niente evidenza distretto
+            self._imposta_evidenza_distretto(None)
         else:
             self.livello_percorso.polylines = [
                 PolylineMarker(
@@ -376,11 +498,22 @@ class MappaController:
         self.page.update()
 
     async def calcola_percorso_scuola(self, scuola: dict) -> None:
-        """On-demand: calcola OSRM, disegna la traccia e mostra riepilogo fisso."""
+        """On-demand: traccia + evidenza distretto finché il percorso resta attivo."""
+        if isinstance(scuola, pd.Series):
+            scuola = scuola.to_dict()
         lat = float(scuola["Latitudine"])
         lon = float(scuola["Longitudine"])
         self._scuola_percorso_nome = str(scuola.get("Nome", "") or "Scuola")
         route = await self._fetch_route(lat, lon)
+        # Evidenza prima del disegno così i marker si aggiornano insieme alla traccia
+        try:
+            distretto = int(scuola["Distretto"])
+        except (KeyError, TypeError, ValueError):
+            distretto = None
+        self._imposta_evidenza_distretto(
+            distretto,
+            str(scuola.get("Codice", "") or ""),
+        )
         self.mostra_percorso(route)
         self.page.update()
 
@@ -499,6 +632,7 @@ class MappaController:
             modal=True,
             scrollable=False,
             bgcolor=UI_SURFACE,
+            on_dismiss=lambda _e: self._su_dismiss_dialog(),
             title=ft.Text(
                 nome,
                 size=17,
@@ -583,10 +717,15 @@ class MappaController:
         self._dialog = dialog
         self.page.show_dialog(dialog)
 
+    def _su_dismiss_dialog(self) -> None:
+        self._dialog = None
+
     def _chiudi_dialog(self) -> None:
         if self._dialog is not None:
             self.page.pop_dialog()
             self._dialog = None
+        # L'evidenza distretto resta se c'è un percorso attivo;
+        # si spegne solo con nascondi_percorso / mostra_percorso(None).
 
     def _scuola_vicina(self, lat: float, lon: float) -> dict | None:
         if self.df_corrente is None or len(self.df_corrente) == 0:

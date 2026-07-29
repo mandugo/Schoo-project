@@ -21,7 +21,7 @@ SIDEBAR_WIDTH = 340
 VIEWPORT_NARROW_PX = 800
 
 # Marker scuole
-MARKER_SCUOLA_SIZE = 26
+MARKER_SCUOLA_SIZE = 30
 MARKER_CASA_SIZE = 30
 
 # Palette UI — slate + teal (civico/mappa, non purple / non cream)
