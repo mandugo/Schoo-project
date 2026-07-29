@@ -16,6 +16,10 @@ from utils.config import (
     MAPPA_CENTRO_LON,
     MAPPA_ZOOM_DETTAGLIO,
     MAPPA_ZOOM_INIZIALE,
+    MARKER_CASA_SIZE,
+    MARKER_SCUOLA_SIZE,
+    MSG_ATTRIBUTION_OSM,
+    UI_META_COLOR,
 )
 from utils.geo import distanza_metri
 
@@ -61,28 +65,46 @@ class MappaController:
             on_tap=self._on_tap,
         )
 
-        self.empty_banner = ft.Text(
-            "",
-            size=14,
-            color=ft.Colors.GREY_700,
-            visible=False,
+        self.attribution = ft.Text(
+            MSG_ATTRIBUTION_OSM,
+            size=11,
+            color=UI_META_COLOR,
         )
 
         self.root = ft.Column(
             expand=True,
             spacing=0,
             controls=[
-                ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=12, vertical=6),
-                    content=self.empty_banner,
-                ),
                 self.mappa,
+                ft.Container(
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+                    alignment=ft.Alignment.CENTER_RIGHT,
+                    content=self.attribution,
+                ),
             ],
         )
 
     def colore_per_distretto(self, distretto: int) -> Any:
         return self.colore_distretto.get(
             int(distretto), COLORI_DISTRETTO[int(distretto) % len(COLORI_DISTRETTO)]
+        )
+
+    def _marker_scuola(self, colore: Any, scuola: dict) -> ft.Control:
+        return ft.GestureDetector(
+            on_tap=lambda e, s=scuola: self.mostra_scuola(s),
+            content=ft.Container(
+                width=MARKER_SCUOLA_SIZE + 6,
+                height=MARKER_SCUOLA_SIZE + 6,
+                alignment=ft.Alignment.CENTER,
+                bgcolor=ft.Colors.with_opacity(0.92, ft.Colors.WHITE),
+                border=ft.Border.all(1.5, colore),
+                border_radius=(MARKER_SCUOLA_SIZE + 6) / 2,
+                content=ft.Icon(
+                    ft.Icons.SCHOOL,
+                    color=colore,
+                    size=MARKER_SCUOLA_SIZE - 4,
+                ),
+            ),
         )
 
     def aggiorna_marker(self, df: pd.DataFrame, mostra_casa: bool = True) -> None:
@@ -107,10 +129,7 @@ class MappaController:
                         float(scuola["Latitudine"]),
                         float(scuola["Longitudine"]),
                     ),
-                    content=ft.GestureDetector(
-                        on_tap=lambda e, s=data: self.mostra_scuola(s),
-                        content=ft.Icon(ft.Icons.SCHOOL, color=colore, size=22),
-                    ),
+                    content=self._marker_scuola(colore, data),
                     data=data,
                 )
             )
@@ -119,20 +138,38 @@ class MappaController:
             markers.append(
                 Marker(
                     coordinates=MapLatitudeLongitude(CASA_LAT, CASA_LON),
-                    content=ft.Icon(ft.Icons.HOME, color=ft.Colors.BLACK, size=30),
+                    content=ft.Container(
+                        width=MARKER_CASA_SIZE + 4,
+                        height=MARKER_CASA_SIZE + 4,
+                        alignment=ft.Alignment.CENTER,
+                        bgcolor=ft.Colors.with_opacity(0.92, ft.Colors.WHITE),
+                        border=ft.Border.all(1.5, ft.Colors.BLACK),
+                        border_radius=(MARKER_CASA_SIZE + 4) / 2,
+                        content=ft.Icon(
+                            ft.Icons.HOME,
+                            color=ft.Colors.BLACK,
+                            size=MARKER_CASA_SIZE - 6,
+                        ),
+                    ),
                     data={"tipo": "casa"},
                 )
             )
 
         self.livello_marker.markers = markers
 
-        n = len(df)
-        if n == 0:
-            self.empty_banner.value = "Nessuna scuola trovata con i filtri attuali."
-            self.empty_banner.visible = True
-        else:
-            self.empty_banner.value = ""
-            self.empty_banner.visible = False
+    async def seleziona_scuola(self, scuola: dict | pd.Series) -> None:
+        """Centra la mappa sulla scuola e apre il dialog (usato dalla mini-lista)."""
+        if isinstance(scuola, pd.Series):
+            scuola = scuola.to_dict()
+
+        await self.mappa.move_to(
+            destination=MapLatitudeLongitude(
+                float(scuola["Latitudine"]),
+                float(scuola["Longitudine"]),
+            ),
+            zoom=MAPPA_ZOOM_DETTAGLIO,
+        )
+        self.mostra_scuola(scuola)
 
     def mostra_scuola(self, scuola: dict | pd.Series) -> None:
         if isinstance(scuola, pd.Series):
@@ -141,13 +178,13 @@ class MappaController:
         distretto = int(scuola["Distretto"])
         colore = self.colore_per_distretto(distretto)
         indirizzo = str(scuola.get("Indirizzo", "") or "")
+        nome = str(scuola.get("Nome", "") or "")
+        lat = float(scuola["Latitudine"])
+        lon = float(scuola["Longitudine"])
 
         async def centra(_e=None):
             await self.mappa.move_to(
-                destination=MapLatitudeLongitude(
-                    float(scuola["Latitudine"]),
-                    float(scuola["Longitudine"]),
-                ),
+                destination=MapLatitudeLongitude(lat, lon),
                 zoom=MAPPA_ZOOM_DETTAGLIO,
             )
             self._chiudi_dialog()
@@ -158,15 +195,18 @@ class MappaController:
                 ft.SnackBar(content=ft.Text("Indirizzo copiato negli appunti"))
             )
 
+        async def apri_google_maps(_e=None):
+            url = f"https://www.google.com/maps?q={lat},{lon}"
+            await ft.UrlLauncher().launch_url(url)
+
         dialog = ft.AlertDialog(
-            title=ft.Text("Informazioni scuola"),
+            title=ft.Text(nome, size=18, weight=ft.FontWeight.BOLD),
             content=ft.Column(
                 [
-                    ft.Text(str(scuola.get("Nome", "")), size=16, weight=ft.FontWeight.BOLD),
-                    ft.Text(f"Indirizzo: {indirizzo}"),
+                    ft.Text(indirizzo, size=13, color=UI_META_COLOR),
                     ft.Row(
                         [
-                            ft.Text("Distretto:"),
+                            ft.Text("Distretto", size=12, color=UI_META_COLOR),
                             ft.Container(
                                 padding=ft.Padding.symmetric(horizontal=8, vertical=2),
                                 bgcolor=colore,
@@ -182,8 +222,16 @@ class MappaController:
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    ft.Text(f"Grado: {scuola.get('Grado', '')}"),
-                    ft.Text(f"Codice: {scuola.get('Codice', '')}"),
+                    ft.Text(
+                        f"Grado: {scuola.get('Grado', '')}",
+                        size=13,
+                        color=UI_META_COLOR,
+                    ),
+                    ft.Text(
+                        f"Codice: {scuola.get('Codice', '')}",
+                        size=12,
+                        color=UI_META_COLOR,
+                    ),
                 ],
                 tight=True,
                 spacing=8,
@@ -191,6 +239,7 @@ class MappaController:
             ),
             actions=[
                 ft.TextButton("Centra sulla mappa", on_click=centra),
+                ft.TextButton("Apri in Google Maps", on_click=apri_google_maps),
                 ft.TextButton("Copia indirizzo", on_click=copia_indirizzo),
                 ft.TextButton("Chiudi", on_click=lambda e: self._chiudi_dialog()),
             ],
@@ -203,6 +252,7 @@ class MappaController:
         if self._dialog is not None:
             self.page.pop_dialog()
             self._dialog = None
+
     def _scuola_vicina(self, lat: float, lon: float) -> dict | None:
         if self.df_corrente is None or len(self.df_corrente) == 0:
             return None
