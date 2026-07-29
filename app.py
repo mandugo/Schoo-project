@@ -8,8 +8,11 @@ from components.sidebar import crea_sidebar, format_conteggio_scuole
 from utils.config import (
     LABEL_AZZERA_FILTRI,
     LABEL_CONDIVIDI,
+    LABEL_GUIDA,
     LABEL_NASCONDI_PERCORSO,
+    LABEL_TORNA_MAPPA,
     MSG_LINK_COPIATO,
+    ROUTE_INFO,
     SIDEBAR_WIDTH,
     UI_ACCENT,
     UI_BORDER,
@@ -26,7 +29,19 @@ from utils.database import elenco_distretti, elenco_gradi, filtra_scuole
 from utils.geo import con_distanza_da
 from utils.share import decode_filtri, encode_filtri
 from utils.state import FilterState
+from views.info_view import crea_info_view
 from views.map_view import crea_mappa, mappa_colori_distretto
+
+
+def _path_da_route(route: str | None) -> str:
+    """Estrae il path senza query (`/info`, `/`)."""
+    if not route:
+        return "/"
+    path = route.split("?", 1)[0].strip() or "/"
+    if not path.startswith("/"):
+        path = "/" + path
+    path = path.rstrip("/") or "/"
+    return path
 
 
 def main(page: ft.Page):
@@ -58,11 +73,12 @@ def main(page: ft.Page):
     state = FilterState(mostra_casa=True, ordina_per_distanza=True)
     scuola_da_url: str | None = None
     syncing_url = {"skip": False}
+    percorso_visibile = {"on": False}
 
     try:
         page.query()
         raw = page.query.to_dict
-        if raw:
+        if raw and _path_da_route(page.route) != ROUTE_INFO:
             decoded, scuola_da_url = decode_filtri(
                 raw,
                 tutti_gradi=tutti_gradi,
@@ -80,7 +96,8 @@ def main(page: ft.Page):
         mappa.nascondi_percorso()
 
     def on_percorso_visibile(visibile: bool) -> None:
-        btn_nascondi_percorso.visible = visibile
+        percorso_visibile["on"] = visibile
+        btn_nascondi_percorso.visible = visibile and explorer_layout.visible
         page.update()
 
     def on_casa_impostata(lat: float, lon: float) -> None:
@@ -144,22 +161,46 @@ def main(page: ft.Page):
     )
     sidebar.applica_stato_ui()
 
-    def aggiorna_url() -> None:
-        if syncing_url["skip"]:
-            return
+    def route_filtri() -> str:
         qs = encode_filtri(
             state,
             tutti_gradi=tutti_gradi,
             tutti_distretti=tutti_distretti,
         )
-        route = f"/?{qs}" if qs else "/"
+        return f"/?{qs}" if qs else "/"
+
+    def naviga(route: str, *, skip_decode: bool = False) -> None:
+        """push_route è async in Flet 0.86 — usare run_task."""
+        if skip_decode:
+            syncing_url["skip"] = True
         try:
-            if page.route != route:
-                # Ignora il prossimo on_route_change generato da push_route
-                syncing_url["skip"] = True
-                page.push_route(route)
+            page.run_task(page.push_route, route)
         except Exception:
             syncing_url["skip"] = False
+            applica_vista(_path_da_route(route))
+            page.update()
+
+    def apri_drawer(_e=None) -> None:
+        try:
+            page.run_task(page.show_drawer)
+        except Exception:
+            pass
+
+    def chiudi_drawer() -> None:
+        try:
+            page.run_task(page.close_drawer)
+        except Exception:
+            pass
+
+    def aggiorna_url() -> None:
+        if syncing_url["skip"]:
+            return
+        if _path_da_route(page.route) == ROUTE_INFO:
+            return
+        route = route_filtri()
+        if page.route != route:
+            # Ignora il prossimo on_route_change generato da push_route
+            naviga(route, skip_decode=True)
 
     def applica_filtri():
         df = filtra_scuole(
@@ -184,6 +225,9 @@ def main(page: ft.Page):
             tutti_distretti=tutti_distretti,
         )
         base = (page.url or "").rstrip("/")
+        # Evita di basare il link sulla pagina /info
+        if base.endswith(ROUTE_INFO):
+            base = base[: -len(ROUTE_INFO)].rstrip("/")
         if qs:
             link = f"{base}/?{qs}" if base else f"?{qs}"
         else:
@@ -191,12 +235,36 @@ def main(page: ft.Page):
         await page.clipboard.set(link)
         page.show_dialog(ft.SnackBar(content=ft.Text(MSG_LINK_COPIATO)))
 
+    def vai_a_info(_e=None) -> None:
+        if _path_da_route(page.route) == ROUTE_INFO:
+            return
+        naviga(ROUTE_INFO)
+
+    def vai_a_explorer(_e=None) -> None:
+        # Stato già in memoria: non ri-decodificare i filtri
+        naviga(route_filtri(), skip_decode=True)
+
     btn_menu = ft.IconButton(
         icon=ft.Icons.MENU,
         icon_color=UI_HEADER_FG,
         tooltip="Filtri",
         visible=False,
-        on_click=lambda _e: page.show_drawer(),
+        on_click=apri_drawer,
+    )
+
+    btn_back_info = ft.IconButton(
+        icon=ft.Icons.ARROW_BACK,
+        icon_color=UI_HEADER_FG,
+        tooltip=LABEL_TORNA_MAPPA,
+        visible=False,
+        on_click=vai_a_explorer,
+    )
+
+    header_sottotitolo = ft.Text(
+        "Explorer",
+        size=11,
+        color=UI_HEADER_MUTED,
+        weight=ft.FontWeight.W_500,
     )
 
     menu_header = ft.PopupMenuButton(
@@ -204,6 +272,11 @@ def main(page: ft.Page):
         icon_color=UI_HEADER_FG,
         tooltip="Menu",
         items=[
+            ft.PopupMenuItem(
+                content=LABEL_GUIDA,
+                icon=ft.Icons.MENU_BOOK,
+                on_click=vai_a_info,
+            ),
             ft.PopupMenuItem(
                 content=LABEL_CONDIVIDI,
                 icon=ft.Icons.LINK,
@@ -234,6 +307,7 @@ def main(page: ft.Page):
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
+                        btn_back_info,
                         btn_menu,
                         ft.Column(
                             spacing=0,
@@ -246,12 +320,7 @@ def main(page: ft.Page):
                                     weight=ft.FontWeight.W_700,
                                     font_family=f"{UI_FONT_FAMILY} SemiBold",
                                 ),
-                                ft.Text(
-                                    "Explorer",
-                                    size=11,
-                                    color=UI_HEADER_MUTED,
-                                    weight=ft.FontWeight.W_500,
-                                ),
+                                header_sottotitolo,
                             ],
                         ),
                     ],
@@ -272,7 +341,7 @@ def main(page: ft.Page):
     sidebar_slot = sidebar.root
     divider = ft.VerticalDivider(width=1, color=UI_BORDER)
 
-    layout = ft.Row(
+    explorer_layout = ft.Row(
         expand=True,
         spacing=0,
         controls=[
@@ -282,11 +351,13 @@ def main(page: ft.Page):
         ],
     )
 
+    info_view = crea_info_view(on_torna=vai_a_explorer)
+
     page.add(
         ft.Column(
             expand=True,
             spacing=0,
-            controls=[header, layout],
+            controls=[header, explorer_layout, info_view],
         )
     )
 
@@ -311,16 +382,14 @@ def main(page: ft.Page):
         sidebar.root.width = 0
         divider.visible = False
         drawer_host.content = sidebar.body
-        btn_menu.visible = True
+        if explorer_layout.visible:
+            btn_menu.visible = True
 
     def _exit_narrow() -> None:
         if not narrow_mode["active"]:
             return
         narrow_mode["active"] = False
-        try:
-            page.close_drawer()
-        except Exception:
-            pass
+        chiudi_drawer()
         drawer_host.content = None
         sidebar.root.content = sidebar.body
         sidebar.root.visible = True
@@ -336,19 +405,33 @@ def main(page: ft.Page):
         else:
             _exit_narrow()
 
+    def applica_vista(path: str) -> None:
+        is_info = path == ROUTE_INFO
+        explorer_layout.visible = not is_info
+        info_view.visible = is_info
+        header_contatore.visible = not is_info
+        btn_back_info.visible = is_info
+        btn_nascondi_percorso.visible = (
+            not is_info and percorso_visibile["on"]
+        )
+        if is_info:
+            btn_menu.visible = False
+            chiudi_drawer()
+            header_sottotitolo.value = "Guida"
+            page.title = "Guida — Scuole Torino Explorer"
+        else:
+            header_sottotitolo.value = "Explorer"
+            page.title = "Scuole Torino Explorer"
+            if narrow_mode["active"]:
+                btn_menu.visible = True
+
     def on_resize(e: ft.PageResizeEvent):
         applica_layout(e.width)
+        if not explorer_layout.visible:
+            btn_menu.visible = False
         page.update()
 
-    def on_route_change(_e=None):
-        if syncing_url["skip"]:
-            syncing_url["skip"] = False
-            return
-        try:
-            page.query()
-            raw = page.query.to_dict
-        except Exception:
-            return
+    def _applica_stato_da_query(raw) -> str | None:
         decoded, scuola_codice = decode_filtri(
             raw,
             tutti_gradi=tutti_gradi,
@@ -363,6 +446,31 @@ def main(page: ft.Page):
         state.casa_lat = decoded.casa_lat
         state.casa_lon = decoded.casa_lon
         sidebar.applica_stato_ui()
+        return scuola_codice
+
+    def on_route_change(_e=None):
+        path = _path_da_route(page.route)
+        applica_vista(path)
+
+        if path == ROUTE_INFO:
+            if syncing_url["skip"]:
+                syncing_url["skip"] = False
+            page.update()
+            return
+
+        if syncing_url["skip"]:
+            syncing_url["skip"] = False
+            page.update()
+            return
+
+        try:
+            page.query()
+            raw = page.query.to_dict
+        except Exception:
+            page.update()
+            return
+
+        scuola_codice = _applica_stato_da_query(raw)
         # Evita riscrittura URL identica durante questo ciclo
         syncing_url["skip"] = True
         try:
@@ -401,9 +509,11 @@ def main(page: ft.Page):
     applica_layout(page.width)
 
     # Primo render
+    path_iniziale = _path_da_route(page.route)
+    applica_vista(path_iniziale)
     applica_filtri()
 
-    if scuola_da_url:
+    if scuola_da_url and path_iniziale != ROUTE_INFO:
         _apri_scuola_codice(scuola_da_url)
 
 
