@@ -22,6 +22,7 @@ from utils.config import (
     CASA_LON,
     DATI_FONTE_LABEL,
     HIT_TEST_METRI,
+    LABEL_ALTRO,
     MAPPA_CENTRO_LAT,
     MAPPA_CENTRO_LON,
     MAPPA_ZOOM_DETTAGLIO,
@@ -35,21 +36,27 @@ from utils.config import (
     POLYLINE_SPESSORE,
     ROUTING_PROFILO_DEFAULT,
     ROUTING_PROFILI,
+    UI_ACCENT,
+    UI_ACCENT_SOFT,
+    UI_BORDER,
+    UI_HEADER_BG,
     UI_META_COLOR,
+    UI_SURFACE,
+    UI_TITLE_COLOR,
 )
 from utils.database import statistiche_dataset
 from utils.geo import distanza_metri, format_distanza
 from utils.routing import RouteResult, calcola_percorso, format_durata
 
 COLORI_DISTRETTO = [
-    ft.Colors.RED,
-    ft.Colors.BLUE,
-    ft.Colors.GREEN,
-    ft.Colors.ORANGE,
-    ft.Colors.PURPLE,
-    ft.Colors.TEAL,
-    ft.Colors.PINK,
-    ft.Colors.BROWN,
+    "#C45C26",
+    "#2E6B9E",
+    "#1B7A6E",
+    "#A67C00",
+    "#8B4513",
+    "#3D7A5A",
+    "#B85C38",
+    "#4A6FA5",
 ]
 
 _PROFILO_LABEL = dict(ROUTING_PROFILI)
@@ -70,12 +77,14 @@ class MappaController:
         page: ft.Page,
         *,
         get_profilo: Callable[[], str] | None = None,
+        set_profilo: Callable[[str], None] | None = None,
         get_casa: Callable[[], tuple[float, float]] | None = None,
         on_casa_impostata: Callable[[float, float], None] | None = None,
         on_percorso_visibile: Callable[[bool], None] | None = None,
     ):
         self.page = page
         self.get_profilo = get_profilo or (lambda: ROUTING_PROFILO_DEFAULT)
+        self.set_profilo = set_profilo
         self.get_casa = get_casa or (lambda: (CASA_LAT, CASA_LON))
         self.on_casa_impostata = on_casa_impostata
         self.on_percorso_visibile = on_percorso_visibile
@@ -124,7 +133,9 @@ class MappaController:
             controls=[
                 self.mappa,
                 ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=6),
+                    bgcolor=UI_SURFACE,
+                    border=ft.Border.only(top=ft.BorderSide(1, UI_BORDER)),
                     content=ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -149,9 +160,14 @@ class MappaController:
                 width=MARKER_SCUOLA_SIZE + 6,
                 height=MARKER_SCUOLA_SIZE + 6,
                 alignment=ft.Alignment.CENTER,
-                bgcolor=ft.Colors.with_opacity(0.92, ft.Colors.WHITE),
-                border=ft.Border.all(1.5, colore),
+                bgcolor=UI_SURFACE,
+                border=ft.Border.all(2, colore),
                 border_radius=(MARKER_SCUOLA_SIZE + 6) / 2,
+                shadow=ft.BoxShadow(
+                    blur_radius=5,
+                    color=ft.Colors.with_opacity(0.28, ft.Colors.BLACK),
+                    offset=ft.Offset(0, 1),
+                ),
                 content=ft.Icon(
                     ft.Icons.SCHOOL,
                     color=colore,
@@ -195,13 +211,18 @@ class MappaController:
                         width=MARKER_CASA_SIZE + 4,
                         height=MARKER_CASA_SIZE + 4,
                         alignment=ft.Alignment.CENTER,
-                        bgcolor=ft.Colors.with_opacity(0.92, ft.Colors.WHITE),
-                        border=ft.Border.all(1.5, ft.Colors.BLACK),
+                        bgcolor=UI_HEADER_BG,
+                        border=ft.Border.all(2, UI_SURFACE),
                         border_radius=(MARKER_CASA_SIZE + 4) / 2,
+                        shadow=ft.BoxShadow(
+                            blur_radius=6,
+                            color=ft.Colors.with_opacity(0.35, ft.Colors.BLACK),
+                            offset=ft.Offset(0, 1),
+                        ),
                         content=ft.Icon(
                             ft.Icons.HOME,
-                            color=ft.Colors.BLACK,
-                            size=MARKER_CASA_SIZE - 6,
+                            color=UI_SURFACE,
+                            size=MARKER_CASA_SIZE - 8,
                         ),
                     ),
                     data={"tipo": "casa"},
@@ -354,6 +375,11 @@ class MappaController:
             self.nascondi_percorso()
             self._chiudi_dialog()
 
+        def on_profilo_select(e: ft.ControlEvent) -> None:
+            profilo = e.control.value or ROUTING_PROFILO_DEFAULT
+            if self.set_profilo is not None:
+                self.set_profilo(profilo)
+
         meta_percorso: list[ft.Control] = [
             ft.Text(
                 f"Linea d'aria: {format_distanza(float(distanza_aria))}",
@@ -383,13 +409,40 @@ class MappaController:
                     )
                 )
 
+        dropdown_profilo = ft.Dropdown(
+            label="Modalità percorso",
+            dense=True,
+            value=self.get_profilo() or ROUTING_PROFILO_DEFAULT,
+            options=[
+                ft.DropdownOption(key=k, text=label) for k, label in ROUTING_PROFILI
+            ],
+            on_select=on_profilo_select,
+        )
+
+        menu_altro = ft.PopupMenuButton(
+            icon=ft.Icons.MORE_VERT,
+            tooltip=LABEL_ALTRO,
+            items=[
+                ft.PopupMenuItem(content="Centra sulla mappa", on_click=centra),
+                ft.PopupMenuItem(content="Nascondi traccia", on_click=nascondi),
+                ft.PopupMenuItem(content="Apri in Google Maps", on_click=apri_google_maps),
+                ft.PopupMenuItem(content="Copia indirizzo", on_click=copia_indirizzo),
+            ],
+        )
+
         dialog = ft.AlertDialog(
             modal=True,
             scrollable=False,
-            title=ft.Text(nome, size=16, weight=ft.FontWeight.BOLD),
-            title_padding=ft.Padding.only(left=20, right=20, top=16, bottom=8),
+            bgcolor=UI_SURFACE,
+            title=ft.Text(
+                nome,
+                size=17,
+                weight=ft.FontWeight.W_700,
+                color=UI_TITLE_COLOR,
+            ),
+            title_padding=ft.Padding.only(left=20, right=20, top=18, bottom=8),
             content_padding=ft.Padding.symmetric(horizontal=20, vertical=8),
-            actions_padding=ft.Padding.only(left=8, right=8, bottom=8),
+            actions_padding=ft.Padding.only(left=12, right=12, bottom=12),
             inset_padding=ft.Padding.symmetric(horizontal=24, vertical=24),
             content=ft.Column(
                 [
@@ -398,9 +451,9 @@ class MappaController:
                         [
                             ft.Text("Distretto", size=12, color=UI_META_COLOR),
                             ft.Container(
-                                padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+                                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                                 bgcolor=colore,
-                                border_radius=4,
+                                border_radius=6,
                                 content=ft.Text(
                                     str(distretto),
                                     color=ft.Colors.WHITE,
@@ -412,30 +465,53 @@ class MappaController:
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    ft.Text(
-                        f"Grado: {scuola.get('Grado', '')}",
-                        size=12,
-                        color=UI_META_COLOR,
-                    ),
-                    ft.Text(
-                        f"Codice: {scuola.get('Codice', '')}",
-                        size=12,
-                        color=UI_META_COLOR,
+                    ft.Container(
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                        bgcolor=UI_ACCENT_SOFT,
+                        border_radius=8,
+                        content=ft.Column(
+                            tight=True,
+                            spacing=2,
+                            controls=[
+                                ft.Text(
+                                    f"Grado: {scuola.get('Grado', '')}",
+                                    size=12,
+                                    color=UI_TITLE_COLOR,
+                                ),
+                                ft.Text(
+                                    f"Codice: {scuola.get('Codice', '')}",
+                                    size=12,
+                                    color=UI_META_COLOR,
+                                ),
+                            ],
+                        ),
                     ),
                     *meta_percorso,
+                    dropdown_profilo,
                 ],
                 tight=True,
-                spacing=6,
+                spacing=8,
                 width=320,
             ),
             actions=[
-                ft.TextButton("Centra", on_click=centra),
-                ft.TextButton("Mostra percorso", on_click=mostra_percorso_mappa),
-                ft.TextButton("Nascondi traccia", on_click=nascondi),
-                ft.TextButton("Indicazioni Google", on_click=apri_indicazioni_google),
-                ft.TextButton("Maps", on_click=apri_google_maps),
-                ft.TextButton("Copia", on_click=copia_indirizzo),
-                ft.TextButton("Chiudi", on_click=lambda e: self._chiudi_dialog()),
+                ft.FilledButton(
+                    "Mostra percorso",
+                    icon=ft.Icons.ROUTE,
+                    style=ft.ButtonStyle(bgcolor=UI_ACCENT, color=ft.Colors.WHITE),
+                    on_click=mostra_percorso_mappa,
+                ),
+                ft.OutlinedButton(
+                    "Indicazioni",
+                    icon=ft.Icons.DIRECTIONS,
+                    style=ft.ButtonStyle(color=UI_ACCENT, side=ft.BorderSide(1, UI_ACCENT)),
+                    on_click=apri_indicazioni_google,
+                ),
+                menu_altro,
+                ft.TextButton(
+                    "Chiudi",
+                    style=ft.ButtonStyle(color=UI_META_COLOR),
+                    on_click=lambda e: self._chiudi_dialog(),
+                ),
             ],
         )
 
@@ -493,6 +569,7 @@ def crea_mappa(
     page: ft.Page,
     *,
     get_profilo: Callable[[], str] | None = None,
+    set_profilo: Callable[[str], None] | None = None,
     get_casa: Callable[[], tuple[float, float]] | None = None,
     on_casa_impostata: Callable[[float, float], None] | None = None,
     on_percorso_visibile: Callable[[bool], None] | None = None,
@@ -500,6 +577,7 @@ def crea_mappa(
     return MappaController(
         page,
         get_profilo=get_profilo,
+        set_profilo=set_profilo,
         get_casa=get_casa,
         on_casa_impostata=on_casa_impostata,
         on_percorso_visibile=on_percorso_visibile,

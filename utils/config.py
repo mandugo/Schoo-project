@@ -1,7 +1,5 @@
 """Costanti di configurazione dell'app."""
 
-import flet as ft
-
 # Marker "casa" (disattivabile dalla sidebar)
 CASA_LAT = 45.0918
 CASA_LON = 7.6357
@@ -26,10 +24,31 @@ VIEWPORT_NARROW_PX = 800
 MARKER_SCUOLA_SIZE = 26
 MARKER_CASA_SIZE = 30
 
-# Palette UI (allineamento leggero, non brand-heavy)
-UI_HEADER_BG = ft.Colors.BLUE_700
-UI_SIDEBAR_BG = ft.Colors.GREY_100
-UI_META_COLOR = ft.Colors.GREY_700
+# Palette UI — slate + teal (civico/mappa, non purple / non cream)
+UI_HEADER_BG = "#0B3D4A"
+UI_HEADER_FG = "#F5FAFB"
+UI_HEADER_MUTED = "#A8C5CC"
+UI_SIDEBAR_BG = "#EEF3F5"
+UI_SURFACE = "#FFFFFF"
+UI_ACCENT = "#1B7A6E"
+UI_ACCENT_SOFT = "#D8EFEA"
+UI_BORDER = "#C9D6DC"
+UI_META_COLOR = "#5C6E76"
+UI_TITLE_COLOR = "#0B3D4A"
+UI_DIVIDER = "#D5E0E5"
+POLYLINE_COLORE = "#1B7A6E"
+POLYLINE_SPESSORE = 4.5
+
+# Font (caricato in app.py)
+UI_FONT_FAMILY = "DM Sans"
+UI_FONT_URL = (
+    "https://github.com/googlefonts/dm-fonts/raw/main/Sans/fonts/"
+    "ttf/DMSans-Regular.ttf"
+)
+UI_FONT_BOLD_URL = (
+    "https://github.com/googlefonts/dm-fonts/raw/main/Sans/fonts/"
+    "ttf/DMSans-SemiBold.ttf"
+)
 
 # Copy italiano condiviso
 LABEL_AZZERA_FILTRI = "Azzera filtri"
@@ -38,9 +57,11 @@ MSG_ATTRIBUTION_OSM = "© OpenStreetMap"
 LABEL_CONDIVIDI = "Copia link filtri"
 MSG_LINK_COPIATO = "Link filtri copiato negli appunti"
 LABEL_ORDINA_DISTANZA = "Ordina per distanza da casa"
-LABEL_IMPOSTA_CASA = "Imposta casa sulla mappa"
-LABEL_RIPRISTINA_CASA = "Ripristina casa predefinita"
+LABEL_IMPOSTA_CASA = "Cambia casa"
+LABEL_RIPRISTINA_CASA = "Predefinita"
 LABEL_NASCONDI_PERCORSO = "Nascondi percorso"
+LABEL_LUOGO = "Luogo"
+LABEL_ALTRO = "Altro"
 MSG_IMPOSTA_CASA = "Clicca sulla mappa per impostare la casa"
 MSG_CASA_IMPOSTATA = "Casa aggiornata"
 DATI_FONTE_LABEL = "Dataset locale CSV"
@@ -54,5 +75,3 @@ ROUTING_PROFILI = (
     ("bike", "In bici"),
     ("car", "In auto"),
 )
-POLYLINE_COLORE = ft.Colors.BLUE_700
-POLYLINE_SPESSORE = 4.0

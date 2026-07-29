@@ -11,7 +11,15 @@ from utils.config import (
     LABEL_NASCONDI_PERCORSO,
     MSG_LINK_COPIATO,
     SIDEBAR_WIDTH,
+    UI_ACCENT,
+    UI_BORDER,
+    UI_FONT_BOLD_URL,
+    UI_FONT_FAMILY,
+    UI_FONT_URL,
     UI_HEADER_BG,
+    UI_HEADER_FG,
+    UI_HEADER_MUTED,
+    UI_SIDEBAR_BG,
     VIEWPORT_NARROW_PX,
 )
 from utils.database import elenco_distretti, elenco_gradi, filtra_scuole
@@ -24,6 +32,17 @@ from views.map_view import crea_mappa, mappa_colori_distretto
 def main(page: ft.Page):
     page.title = "Scuole Torino Explorer"
     page.padding = 0
+    page.bgcolor = UI_SIDEBAR_BG
+    page.fonts = {
+        UI_FONT_FAMILY: UI_FONT_URL,
+        f"{UI_FONT_FAMILY} SemiBold": UI_FONT_BOLD_URL,
+    }
+    page.theme = ft.Theme(
+        font_family=UI_FONT_FAMILY,
+        color_scheme_seed=UI_ACCENT,
+        use_material3=True,
+        scaffold_bgcolor=UI_SIDEBAR_BG,
+    )
 
     # Dimensioni utili in desktop; innocue / ignorate in web
     try:
@@ -56,7 +75,8 @@ def main(page: ft.Page):
     def on_seleziona_scuola(scuola: dict) -> None:
         page.run_task(mappa.seleziona_scuola, scuola)
 
-    def on_profilo_cambiato(_profilo: str) -> None:
+    def set_profilo(profilo: str) -> None:
+        state.set_profilo_routing(profilo, notify=False)
         mappa.nascondi_percorso()
 
     def on_percorso_visibile(visibile: bool) -> None:
@@ -79,24 +99,36 @@ def main(page: ft.Page):
     mappa = crea_mappa(
         page,
         get_profilo=lambda: state.profilo_routing,
+        set_profilo=set_profilo,
         get_casa=lambda: (state.casa_lat, state.casa_lon),
         on_casa_impostata=on_casa_impostata,
         on_percorso_visibile=on_percorso_visibile,
     )
     mappa.colore_distretto = mappa_colori_distretto(tutti_distretti)
 
-    header_contatore = ft.Text(
-        format_conteggio_scuole(0),
-        size=14,
-        color=ft.Colors.WHITE,
+    header_contatore = ft.Container(
+        padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+        bgcolor=ft.Colors.with_opacity(0.18, UI_HEADER_FG),
+        border_radius=20,
+        content=ft.Text(
+            format_conteggio_scuole(0),
+            size=13,
+            color=UI_HEADER_FG,
+            weight=ft.FontWeight.W_500,
+        ),
     )
 
     def aggiorna_conteggio(n: int) -> None:
-        header_contatore.value = format_conteggio_scuole(n)
+        header_contatore.content = ft.Text(
+            format_conteggio_scuole(n),
+            size=13,
+            color=UI_HEADER_FG,
+            weight=ft.FontWeight.W_500,
+        )
 
     btn_nascondi_percorso = ft.IconButton(
         icon=ft.Icons.LAYERS_CLEAR,
-        icon_color=ft.Colors.WHITE,
+        icon_color=UI_HEADER_FG,
         tooltip=LABEL_NASCONDI_PERCORSO,
         visible=False,
         on_click=lambda _e: mappa.nascondi_percorso(),
@@ -107,7 +139,6 @@ def main(page: ft.Page):
         on_seleziona_scuola=on_seleziona_scuola,
         colore_distretto=mappa.colore_per_distretto,
         on_conteggio=aggiorna_conteggio,
-        on_profilo_cambiato=on_profilo_cambiato,
         on_imposta_casa=on_imposta_casa,
         on_ripristina_casa=on_ripristina_casa,
     )
@@ -124,9 +155,9 @@ def main(page: ft.Page):
         route = f"/?{qs}" if qs else "/"
         try:
             if page.route != route:
-                # Ignora il prossimo on_route_change generato da page.go
+                # Ignora il prossimo on_route_change generato da push_route
                 syncing_url["skip"] = True
-                page.go(route)
+                page.push_route(route)
         except Exception:
             syncing_url["skip"] = False
 
@@ -153,7 +184,6 @@ def main(page: ft.Page):
             tutti_distretti=tutti_distretti,
         )
         base = (page.url or "").rstrip("/")
-        # page.url spesso è origin senza path; route gestisce i filtri
         if qs:
             link = f"{base}/?{qs}" if base else f"?{qs}"
         else:
@@ -163,55 +193,76 @@ def main(page: ft.Page):
 
     btn_menu = ft.IconButton(
         icon=ft.Icons.MENU,
-        icon_color=ft.Colors.WHITE,
+        icon_color=UI_HEADER_FG,
         tooltip="Filtri",
         visible=False,
         on_click=lambda _e: page.show_drawer(),
     )
 
-    btn_condividi = ft.IconButton(
-        icon=ft.Icons.LINK,
-        icon_color=ft.Colors.WHITE,
-        tooltip=LABEL_CONDIVIDI,
-        on_click=copia_link_filtri,
-    )
-
-    btn_azzera_header = ft.IconButton(
-        icon=ft.Icons.FILTER_ALT_OFF,
-        icon_color=ft.Colors.WHITE,
-        tooltip=LABEL_AZZERA_FILTRI,
-        on_click=lambda _e: sidebar.azzera_filtri(),
+    menu_header = ft.PopupMenuButton(
+        icon=ft.Icons.MORE_VERT,
+        icon_color=UI_HEADER_FG,
+        tooltip="Menu",
+        items=[
+            ft.PopupMenuItem(
+                content=LABEL_CONDIVIDI,
+                icon=ft.Icons.LINK,
+                on_click=copia_link_filtri,
+            ),
+            ft.PopupMenuItem(
+                content=LABEL_AZZERA_FILTRI,
+                icon=ft.Icons.FILTER_ALT_OFF,
+                on_click=lambda _e: sidebar.azzera_filtri(),
+            ),
+        ],
     )
 
     header = ft.Container(
-        height=56,
+        height=58,
         bgcolor=UI_HEADER_BG,
-        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+        shadow=ft.BoxShadow(
+            blur_radius=12,
+            color=ft.Colors.with_opacity(0.25, ft.Colors.BLACK),
+            offset=ft.Offset(0, 2),
+        ),
         content=ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Row(
-                    spacing=4,
+                    spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         btn_menu,
-                        ft.Text(
-                            "Scuole Torino Explorer",
-                            size=20,
-                            color=ft.Colors.WHITE,
-                            weight=ft.FontWeight.BOLD,
+                        ft.Column(
+                            spacing=0,
+                            tight=True,
+                            controls=[
+                                ft.Text(
+                                    "Scuole Torino",
+                                    size=18,
+                                    color=UI_HEADER_FG,
+                                    weight=ft.FontWeight.W_700,
+                                    font_family=f"{UI_FONT_FAMILY} SemiBold",
+                                ),
+                                ft.Text(
+                                    "Explorer",
+                                    size=11,
+                                    color=UI_HEADER_MUTED,
+                                    weight=ft.FontWeight.W_500,
+                                ),
+                            ],
                         ),
                     ],
                 ),
                 ft.Row(
-                    spacing=4,
+                    spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         header_contatore,
                         btn_nascondi_percorso,
-                        btn_condividi,
-                        btn_azzera_header,
+                        menu_header,
                     ],
                 ),
             ],
@@ -219,7 +270,7 @@ def main(page: ft.Page):
     )
 
     sidebar_slot = sidebar.root
-    divider = ft.VerticalDivider(width=1)
+    divider = ft.VerticalDivider(width=1, color=UI_BORDER)
 
     layout = ft.Row(
         expand=True,
