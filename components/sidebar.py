@@ -9,6 +9,7 @@ import pandas as pd
 
 from utils.config import (
     LABEL_AZZERA_FILTRI,
+    LABEL_ORDINA_DISTANZA,
     MINI_LISTA_MAX,
     MSG_EMPTY_RISULTATI,
     SIDEBAR_WIDTH,
@@ -21,6 +22,7 @@ from utils.database import (
     elenco_distretti,
     elenco_gradi,
 )
+from utils.geo import format_distanza
 from utils.state import FilterState
 
 
@@ -84,6 +86,11 @@ class SidebarController:
             label="Mostra casa",
             value=state.mostra_casa,
             on_change=self._on_casa,
+        )
+        self.switch_ordina = ft.Switch(
+            label=LABEL_ORDINA_DISTANZA,
+            value=state.ordina_per_distanza,
+            on_change=self._on_ordina,
         )
 
         self.empty_state = ft.Column(
@@ -151,7 +158,7 @@ class SidebarController:
             maintain_state=True,
             expanded_cross_axis_alignment=ft.CrossAxisAlignment.START,
             controls_padding=ft.Padding.only(left=4, right=4, bottom=4),
-            controls=[self.switch_casa],
+            controls=[self.switch_casa, self.switch_ordina],
         )
 
         self.body = ft.Column(
@@ -265,6 +272,9 @@ class SidebarController:
     def _on_casa(self, e: ft.ControlEvent) -> None:
         self.state.set_mostra_casa(bool(e.control.value))
 
+    def _on_ordina(self, e: ft.ControlEvent) -> None:
+        self.state.set_ordina_per_distanza(bool(e.control.value))
+
     def _gradi_tutti(self, _e=None) -> None:
         for cb in self._grado_checks.values():
             cb.value = True
@@ -294,12 +304,25 @@ class SidebarController:
         self.campo_ricerca.value = ""
         self._clear_btn.visible = False
         self.switch_casa.value = True
+        self.switch_ordina.value = True
 
         self.state.set_gradi(list(self.gradi), notify=False)
         self.state.set_distretti(list(self.distretti), notify=False)
         self.state.set_testo("", notify=False)
         self.state.set_mostra_casa(True, notify=False)
+        self.state.set_ordina_per_distanza(True, notify=False)
         self.state.notify()
+
+    def applica_stato_ui(self) -> None:
+        """Allinea checkbox/switch/campo allo stato (es. dopo decode URL)."""
+        for grado, cb in self._grado_checks.items():
+            cb.value = grado in self.state.gradi
+        for d, cb in self._distretto_checks.items():
+            cb.value = d in self.state.distretti
+        self.campo_ricerca.value = self.state.testo
+        self._clear_btn.visible = bool(self.state.testo.strip())
+        self.switch_casa.value = self.state.mostra_casa
+        self.switch_ordina.value = self.state.ordina_per_distanza
 
     def aggiorna_risultati(self, df: pd.DataFrame) -> None:
         n = len(df)
@@ -316,6 +339,9 @@ class SidebarController:
                 data = row.to_dict()
                 distretto = int(row["Distretto"])
                 colore = self._colore(distretto)
+                dist_txt = ""
+                if "Distanza_m" in row and pd.notna(row["Distanza_m"]):
+                    dist_txt = f" · {format_distanza(float(row['Distanza_m']))}"
                 self.risultati.controls.append(
                     ft.ListTile(
                         dense=True,
@@ -326,7 +352,7 @@ class SidebarController:
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
                         subtitle=ft.Text(
-                            f"Distretto {distretto} · {row.get('Grado', '')}",
+                            f"Distretto {distretto} · {row.get('Grado', '')}{dist_txt}",
                             size=11,
                         ),
                         leading=ft.Icon(ft.Icons.SCHOOL, color=colore, size=20),

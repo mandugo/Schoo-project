@@ -29,6 +29,28 @@ def carica_scuole(*, force_reload: bool = False) -> pd.DataFrame:
     return _df_cache.copy()
 
 
+def statistiche_dataset() -> dict[str, int | str]:
+    """Conteggi sul CSV grezzo (inclusi record senza coordinate)."""
+    df = pd.read_csv(FILE_CSV)
+    totale = len(df)
+    con_coord = int(df.dropna(subset=["Latitudine", "Longitudine"]).shape[0])
+    senza_coord = totale - con_coord
+    mtime = ""
+    try:
+        from datetime import datetime
+
+        mtime = datetime.fromtimestamp(FILE_CSV.stat().st_mtime).strftime("%Y-%m-%d")
+    except OSError:
+        pass
+    return {
+        "totale": totale,
+        "con_coordinate": con_coord,
+        "senza_coordinate": senza_coord,
+        "aggiornato": mtime,
+        "file": FILE_CSV.name,
+    }
+
+
 def elenco_distretti() -> list[int]:
     df = carica_scuole()
     return sorted(df["Distretto"].unique().tolist())

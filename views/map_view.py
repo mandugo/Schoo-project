@@ -11,6 +11,7 @@ from flet_map import Map, MapLatitudeLongitude, Marker, MarkerLayer, TileLayer
 from utils.config import (
     CASA_LAT,
     CASA_LON,
+    DATI_FONTE_LABEL,
     HIT_TEST_METRI,
     MAPPA_CENTRO_LAT,
     MAPPA_CENTRO_LON,
@@ -21,7 +22,8 @@ from utils.config import (
     MSG_ATTRIBUTION_OSM,
     UI_META_COLOR,
 )
-from utils.geo import distanza_metri
+from utils.geo import distanza_metri, format_distanza
+from utils.database import statistiche_dataset
 
 COLORI_DISTRETTO = [
     ft.Colors.RED,
@@ -71,6 +73,18 @@ class MappaController:
             color=UI_META_COLOR,
         )
 
+        stats = statistiche_dataset()
+        aggiornato = stats.get("aggiornato") or "n/d"
+        self.dati_meta = ft.Text(
+            (
+                f"{DATI_FONTE_LABEL} · {stats['con_coordinate']}/{stats['totale']} "
+                f"con coordinate · {stats['senza_coordinate']} escluse · "
+                f"agg. {aggiornato}"
+            ),
+            size=11,
+            color=UI_META_COLOR,
+        )
+
         self.root = ft.Column(
             expand=True,
             spacing=0,
@@ -78,8 +92,14 @@ class MappaController:
                 self.mappa,
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=10, vertical=4),
-                    alignment=ft.Alignment.CENTER_RIGHT,
-                    content=self.attribution,
+                    content=ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            self.dati_meta,
+                            self.attribution,
+                        ],
+                    ),
                 ),
             ],
         )
@@ -181,6 +201,9 @@ class MappaController:
         nome = str(scuola.get("Nome", "") or "")
         lat = float(scuola["Latitudine"])
         lon = float(scuola["Longitudine"])
+        distanza_m = scuola.get("Distanza_m")
+        if distanza_m is None or (isinstance(distanza_m, float) and pd.isna(distanza_m)):
+            distanza_m = distanza_metri(CASA_LAT, CASA_LON, lat, lon)
 
         async def centra(_e=None):
             await self.mappa.move_to(
@@ -197,6 +220,14 @@ class MappaController:
 
         async def apri_google_maps(_e=None):
             url = f"https://www.google.com/maps?q={lat},{lon}"
+            await ft.UrlLauncher().launch_url(url)
+
+        async def apri_indicazioni(_e=None):
+            url = (
+                "https://www.google.com/maps/dir/?api=1"
+                f"&origin={CASA_LAT},{CASA_LON}"
+                f"&destination={lat},{lon}"
+            )
             await ft.UrlLauncher().launch_url(url)
 
         dialog = ft.AlertDialog(
@@ -232,6 +263,11 @@ class MappaController:
                         size=12,
                         color=UI_META_COLOR,
                     ),
+                    ft.Text(
+                        f"Distanza da casa: {format_distanza(float(distanza_m))}",
+                        size=13,
+                        color=UI_META_COLOR,
+                    ),
                 ],
                 tight=True,
                 spacing=8,
@@ -239,6 +275,7 @@ class MappaController:
             ),
             actions=[
                 ft.TextButton("Centra sulla mappa", on_click=centra),
+                ft.TextButton("Indicazioni", on_click=apri_indicazioni),
                 ft.TextButton("Apri in Google Maps", on_click=apri_google_maps),
                 ft.TextButton("Copia indirizzo", on_click=copia_indirizzo),
                 ft.TextButton("Chiudi", on_click=lambda e: self._chiudi_dialog()),

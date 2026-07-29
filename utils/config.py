@@ -35,3 +35,7 @@ UI_META_COLOR = ft.Colors.GREY_700
 LABEL_AZZERA_FILTRI = "Azzera filtri"
 MSG_EMPTY_RISULTATI = "Nessuna scuola con i filtri attuali"
 MSG_ATTRIBUTION_OSM = "© OpenStreetMap"
+LABEL_CONDIVIDI = "Copia link filtri"
+MSG_LINK_COPIATO = "Link filtri copiato negli appunti"
+LABEL_ORDINA_DISTANZA = "Ordina per distanza da casa"
+DATI_FONTE_LABEL = "Dataset locale CSV"

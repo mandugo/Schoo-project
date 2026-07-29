@@ -15,6 +15,7 @@ class FilterState:
     distretti: list[int] = field(default_factory=list)
     testo: str = ""
     mostra_casa: bool = True
+    ordina_per_distanza: bool = True
     _on_change: OnChange | None = field(default=None, repr=False, compare=False)
 
     def set_on_change(self, callback: OnChange | None) -> None:
@@ -41,6 +42,11 @@ class FilterState:
 
     def set_mostra_casa(self, value: bool, *, notify: bool = True) -> None:
         self.mostra_casa = bool(value)
+        if notify:
+            self.notify()
+
+    def set_ordina_per_distanza(self, value: bool, *, notify: bool = True) -> None:
+        self.ordina_per_distanza = bool(value)
         if notify:
             self.notify()
 
