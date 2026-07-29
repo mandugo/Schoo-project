@@ -6,10 +6,9 @@ import flet as ft
 
 from components.sidebar import crea_sidebar, format_conteggio_scuole
 from utils.config import (
-    CASA_LAT,
-    CASA_LON,
     LABEL_AZZERA_FILTRI,
     LABEL_CONDIVIDI,
+    LABEL_NASCONDI_PERCORSO,
     MSG_LINK_COPIATO,
     SIDEBAR_WIDTH,
     UI_HEADER_BG,
@@ -54,7 +53,36 @@ def main(page: ft.Page):
     except Exception:
         pass
 
-    mappa = crea_mappa(page)
+    def on_seleziona_scuola(scuola: dict) -> None:
+        page.run_task(mappa.seleziona_scuola, scuola)
+
+    def on_profilo_cambiato(_profilo: str) -> None:
+        mappa.nascondi_percorso()
+
+    def on_percorso_visibile(visibile: bool) -> None:
+        btn_nascondi_percorso.visible = visibile
+        page.update()
+
+    def on_casa_impostata(lat: float, lon: float) -> None:
+        mappa.nascondi_percorso()
+        state.set_casa(lat, lon)
+        sidebar.aggiorna_label_casa()
+
+    def on_imposta_casa() -> None:
+        mappa.avvia_imposta_casa()
+
+    def on_ripristina_casa() -> None:
+        mappa.nascondi_percorso()
+        state.ripristina_casa_default()
+        sidebar.aggiorna_label_casa()
+
+    mappa = crea_mappa(
+        page,
+        get_profilo=lambda: state.profilo_routing,
+        get_casa=lambda: (state.casa_lat, state.casa_lon),
+        on_casa_impostata=on_casa_impostata,
+        on_percorso_visibile=on_percorso_visibile,
+    )
     mappa.colore_distretto = mappa_colori_distretto(tutti_distretti)
 
     header_contatore = ft.Text(
@@ -66,14 +94,22 @@ def main(page: ft.Page):
     def aggiorna_conteggio(n: int) -> None:
         header_contatore.value = format_conteggio_scuole(n)
 
-    def on_seleziona_scuola(scuola: dict) -> None:
-        page.run_task(mappa.seleziona_scuola, scuola)
+    btn_nascondi_percorso = ft.IconButton(
+        icon=ft.Icons.LAYERS_CLEAR,
+        icon_color=ft.Colors.WHITE,
+        tooltip=LABEL_NASCONDI_PERCORSO,
+        visible=False,
+        on_click=lambda _e: mappa.nascondi_percorso(),
+    )
 
     sidebar = crea_sidebar(
         state,
         on_seleziona_scuola=on_seleziona_scuola,
         colore_distretto=mappa.colore_per_distretto,
         on_conteggio=aggiorna_conteggio,
+        on_profilo_cambiato=on_profilo_cambiato,
+        on_imposta_casa=on_imposta_casa,
+        on_ripristina_casa=on_ripristina_casa,
     )
     sidebar.applica_stato_ui()
 
@@ -100,7 +136,7 @@ def main(page: ft.Page):
             distretti=state.distretti,
             testo=state.testo,
         )
-        df = con_distanza_da(df, CASA_LAT, CASA_LON)
+        df = con_distanza_da(df, state.casa_lat, state.casa_lon)
         if state.ordina_per_distanza and len(df):
             df = df.sort_values("Distanza_m", ascending=True)
         mappa.aggiorna_marker(df, mostra_casa=state.mostra_casa)
@@ -171,7 +207,12 @@ def main(page: ft.Page):
                 ft.Row(
                     spacing=4,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[header_contatore, btn_condividi, btn_azzera_header],
+                    controls=[
+                        header_contatore,
+                        btn_nascondi_percorso,
+                        btn_condividi,
+                        btn_azzera_header,
+                    ],
                 ),
             ],
         ),
@@ -267,6 +308,9 @@ def main(page: ft.Page):
         state.testo = decoded.testo
         state.mostra_casa = decoded.mostra_casa
         state.ordina_per_distanza = decoded.ordina_per_distanza
+        state.profilo_routing = decoded.profilo_routing
+        state.casa_lat = decoded.casa_lat
+        state.casa_lon = decoded.casa_lon
         sidebar.applica_stato_ui()
         # Evita riscrittura URL identica durante questo ciclo
         syncing_url["skip"] = True
@@ -276,7 +320,7 @@ def main(page: ft.Page):
                 distretti=state.distretti,
                 testo=state.testo,
             )
-            df = con_distanza_da(df, CASA_LAT, CASA_LON)
+            df = con_distanza_da(df, state.casa_lat, state.casa_lon)
             if state.ordina_per_distanza and len(df):
                 df = df.sort_values("Distanza_m", ascending=True)
             mappa.aggiorna_marker(df, mostra_casa=state.mostra_casa)
@@ -297,7 +341,7 @@ def main(page: ft.Page):
         if len(match) == 0:
             return
         row = match.iloc[0].to_dict()
-        df_dist = con_distanza_da(match, CASA_LAT, CASA_LON)
+        df_dist = con_distanza_da(match, state.casa_lat, state.casa_lon)
         row["Distanza_m"] = float(df_dist.iloc[0]["Distanza_m"])
         page.run_task(mappa.seleziona_scuola, row)
 

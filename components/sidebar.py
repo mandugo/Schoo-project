@@ -9,9 +9,13 @@ import pandas as pd
 
 from utils.config import (
     LABEL_AZZERA_FILTRI,
+    LABEL_IMPOSTA_CASA,
     LABEL_ORDINA_DISTANZA,
+    LABEL_RIPRISTINA_CASA,
     MINI_LISTA_MAX,
     MSG_EMPTY_RISULTATI,
+    ROUTING_PROFILI,
+    ROUTING_PROFILO_DEFAULT,
     SIDEBAR_WIDTH,
     UI_META_COLOR,
     UI_SIDEBAR_BG,
@@ -40,11 +44,17 @@ class SidebarController:
         on_seleziona_scuola: Callable[[dict], None] | None = None,
         colore_distretto: Callable[[int], object] | None = None,
         on_conteggio: Callable[[int], None] | None = None,
+        on_profilo_cambiato: Callable[[str], None] | None = None,
+        on_imposta_casa: Callable[[], None] | None = None,
+        on_ripristina_casa: Callable[[], None] | None = None,
     ):
         self.state = state
         self.on_seleziona_scuola = on_seleziona_scuola
         self.colore_distretto = colore_distretto
         self.on_conteggio = on_conteggio
+        self.on_profilo_cambiato = on_profilo_cambiato
+        self.on_imposta_casa = on_imposta_casa
+        self.on_ripristina_casa = on_ripristina_casa
 
         self.gradi = elenco_gradi()
         self.distretti = elenco_distretti()
@@ -91,6 +101,30 @@ class SidebarController:
             label=LABEL_ORDINA_DISTANZA,
             value=state.ordina_per_distanza,
             on_change=self._on_ordina,
+        )
+        self.dropdown_profilo = ft.Dropdown(
+            label="Percorso",
+            dense=True,
+            value=state.profilo_routing or ROUTING_PROFILO_DEFAULT,
+            options=[
+                ft.DropdownOption(key=k, text=label) for k, label in ROUTING_PROFILI
+            ],
+            on_select=self._on_profilo,
+        )
+        self.label_casa_coords = ft.Text(
+            self._testo_coords_casa(),
+            size=11,
+            color=UI_META_COLOR,
+        )
+        self.btn_imposta_casa = ft.TextButton(
+            LABEL_IMPOSTA_CASA,
+            icon=ft.Icons.ADD_LOCATION_ALT,
+            on_click=self._click_imposta_casa,
+        )
+        self.btn_ripristina_casa = ft.TextButton(
+            LABEL_RIPRISTINA_CASA,
+            icon=ft.Icons.HOME_REPAIR_SERVICE,
+            on_click=self._click_ripristina_casa,
         )
 
         self.empty_state = ft.Column(
@@ -158,7 +192,14 @@ class SidebarController:
             maintain_state=True,
             expanded_cross_axis_alignment=ft.CrossAxisAlignment.START,
             controls_padding=ft.Padding.only(left=4, right=4, bottom=4),
-            controls=[self.switch_casa, self.switch_ordina],
+            controls=[
+                self.switch_casa,
+                self.label_casa_coords,
+                self.btn_imposta_casa,
+                self.btn_ripristina_casa,
+                self.switch_ordina,
+                self.dropdown_profilo,
+            ],
         )
 
         self.body = ft.Column(
@@ -269,11 +310,35 @@ class SidebarController:
         self._clear_btn.visible = False
         self.state.set_testo("")
 
+    def _testo_coords_casa(self) -> str:
+        return f"Casa: {self.state.casa_lat:.5f}, {self.state.casa_lon:.5f}"
+
+    def aggiorna_label_casa(self) -> None:
+        self.label_casa_coords.value = self._testo_coords_casa()
+
+    def _click_imposta_casa(self, _e=None) -> None:
+        if self.on_imposta_casa is not None:
+            self.on_imposta_casa()
+
+    def _click_ripristina_casa(self, _e=None) -> None:
+        if self.on_ripristina_casa is not None:
+            self.on_ripristina_casa()
+        else:
+            self.state.ripristina_casa_default()
+            self.aggiorna_label_casa()
+
     def _on_casa(self, e: ft.ControlEvent) -> None:
         self.state.set_mostra_casa(bool(e.control.value))
 
     def _on_ordina(self, e: ft.ControlEvent) -> None:
         self.state.set_ordina_per_distanza(bool(e.control.value))
+
+    def _on_profilo(self, e: ft.ControlEvent) -> None:
+        # Non ricalcola i filtri: il profilo conta al prossimo click scuola
+        profilo = e.control.value or ROUTING_PROFILO_DEFAULT
+        self.state.set_profilo_routing(profilo, notify=False)
+        if self.on_profilo_cambiato is not None:
+            self.on_profilo_cambiato(profilo)
 
     def _gradi_tutti(self, _e=None) -> None:
         for cb in self._grado_checks.values():
@@ -305,12 +370,14 @@ class SidebarController:
         self._clear_btn.visible = False
         self.switch_casa.value = True
         self.switch_ordina.value = True
+        self.dropdown_profilo.value = ROUTING_PROFILO_DEFAULT
 
         self.state.set_gradi(list(self.gradi), notify=False)
         self.state.set_distretti(list(self.distretti), notify=False)
         self.state.set_testo("", notify=False)
         self.state.set_mostra_casa(True, notify=False)
         self.state.set_ordina_per_distanza(True, notify=False)
+        self.state.set_profilo_routing(ROUTING_PROFILO_DEFAULT, notify=False)
         self.state.notify()
 
     def applica_stato_ui(self) -> None:
@@ -323,6 +390,10 @@ class SidebarController:
         self._clear_btn.visible = bool(self.state.testo.strip())
         self.switch_casa.value = self.state.mostra_casa
         self.switch_ordina.value = self.state.ordina_per_distanza
+        self.dropdown_profilo.value = (
+            self.state.profilo_routing or ROUTING_PROFILO_DEFAULT
+        )
+        self.aggiorna_label_casa()
 
     def aggiorna_risultati(self, df: pd.DataFrame) -> None:
         n = len(df)
@@ -379,10 +450,16 @@ def crea_sidebar(
     on_seleziona_scuola: Callable[[dict], None] | None = None,
     colore_distretto: Callable[[int], object] | None = None,
     on_conteggio: Callable[[int], None] | None = None,
+    on_profilo_cambiato: Callable[[str], None] | None = None,
+    on_imposta_casa: Callable[[], None] | None = None,
+    on_ripristina_casa: Callable[[], None] | None = None,
 ) -> SidebarController:
     return SidebarController(
         state,
         on_seleziona_scuola=on_seleziona_scuola,
         colore_distretto=colore_distretto,
         on_conteggio=on_conteggio,
+        on_profilo_cambiato=on_profilo_cambiato,
+        on_imposta_casa=on_imposta_casa,
+        on_ripristina_casa=on_ripristina_casa,
     )

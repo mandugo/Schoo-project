@@ -1,12 +1,21 @@
-"""Vista mappa: marker scuole filtrati, hit-test, dialog info."""
+"""Vista mappa: marker scuole filtrati, hit-test, dialog info, percorso OSRM."""
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import Any, Callable
 
 import flet as ft
 import pandas as pd
-from flet_map import Map, MapLatitudeLongitude, Marker, MarkerLayer, TileLayer
+from flet_map import (
+    Map,
+    MapLatitudeLongitude,
+    Marker,
+    MarkerLayer,
+    PolylineLayer,
+    PolylineMarker,
+    TileLayer,
+)
 
 from utils.config import (
     CASA_LAT,
@@ -20,10 +29,17 @@ from utils.config import (
     MARKER_CASA_SIZE,
     MARKER_SCUOLA_SIZE,
     MSG_ATTRIBUTION_OSM,
+    MSG_CASA_IMPOSTATA,
+    MSG_IMPOSTA_CASA,
+    POLYLINE_COLORE,
+    POLYLINE_SPESSORE,
+    ROUTING_PROFILO_DEFAULT,
+    ROUTING_PROFILI,
     UI_META_COLOR,
 )
-from utils.geo import distanza_metri, format_distanza
 from utils.database import statistiche_dataset
+from utils.geo import distanza_metri, format_distanza
+from utils.routing import RouteResult, calcola_percorso, format_durata
 
 COLORI_DISTRETTO = [
     ft.Colors.RED,
@@ -36,6 +52,8 @@ COLORI_DISTRETTO = [
     ft.Colors.BROWN,
 ]
 
+_PROFILO_LABEL = dict(ROUTING_PROFILI)
+
 
 def mappa_colori_distretto(distretti: list[int]) -> dict[int, Any]:
     return {
@@ -45,14 +63,29 @@ def mappa_colori_distretto(distretti: list[int]) -> dict[int, Any]:
 
 
 class MappaController:
-    """Gestisce MarkerLayer, dialog e aggiornamenti filtri."""
+    """Gestisce MarkerLayer, percorso, dialog e aggiornamenti filtri."""
 
-    def __init__(self, page: ft.Page):
+    def __init__(
+        self,
+        page: ft.Page,
+        *,
+        get_profilo: Callable[[], str] | None = None,
+        get_casa: Callable[[], tuple[float, float]] | None = None,
+        on_casa_impostata: Callable[[float, float], None] | None = None,
+        on_percorso_visibile: Callable[[bool], None] | None = None,
+    ):
         self.page = page
+        self.get_profilo = get_profilo or (lambda: ROUTING_PROFILO_DEFAULT)
+        self.get_casa = get_casa or (lambda: (CASA_LAT, CASA_LON))
+        self.on_casa_impostata = on_casa_impostata
+        self.on_percorso_visibile = on_percorso_visibile
+        self._mode_imposta_casa = False
         self.df_corrente: pd.DataFrame = pd.DataFrame()
         self.colore_distretto: dict[int, Any] = {}
         self.livello_marker = MarkerLayer(markers=[])
+        self.livello_percorso = PolylineLayer(polylines=[])
         self._dialog: ft.AlertDialog | None = None
+        self._route_corrente: RouteResult | None = None
 
         self.livello_mappa = TileLayer(
             url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -63,7 +96,7 @@ class MappaController:
             expand=True,
             initial_center=MapLatitudeLongitude(MAPPA_CENTRO_LAT, MAPPA_CENTRO_LON),
             initial_zoom=MAPPA_ZOOM_INIZIALE,
-            layers=[self.livello_mappa, self.livello_marker],
+            layers=[self.livello_mappa, self.livello_percorso, self.livello_marker],
             on_tap=self._on_tap,
         )
 
@@ -111,7 +144,7 @@ class MappaController:
 
     def _marker_scuola(self, colore: Any, scuola: dict) -> ft.Control:
         return ft.GestureDetector(
-            on_tap=lambda e, s=scuola: self.mostra_scuola(s),
+            on_tap=lambda e, s=scuola: self.page.run_task(self.seleziona_scuola, s),
             content=ft.Container(
                 width=MARKER_SCUOLA_SIZE + 6,
                 height=MARKER_SCUOLA_SIZE + 6,
@@ -130,7 +163,6 @@ class MappaController:
     def aggiorna_marker(self, df: pd.DataFrame, mostra_casa: bool = True) -> None:
         self.df_corrente = df.copy()
         distretti = sorted(df["Distretto"].astype(int).unique().tolist()) if len(df) else []
-        # Mantieni palette stabile rispetto a tutti i distretti già visti
         for d in distretti:
             if d not in self.colore_distretto:
                 idx = len(self.colore_distretto)
@@ -155,9 +187,10 @@ class MappaController:
             )
 
         if mostra_casa:
+            casa_lat, casa_lon = self.get_casa()
             markers.append(
                 Marker(
-                    coordinates=MapLatitudeLongitude(CASA_LAT, CASA_LON),
+                    coordinates=MapLatitudeLongitude(casa_lat, casa_lon),
                     content=ft.Container(
                         width=MARKER_CASA_SIZE + 4,
                         height=MARKER_CASA_SIZE + 4,
@@ -177,8 +210,56 @@ class MappaController:
 
         self.livello_marker.markers = markers
 
+    def avvia_imposta_casa(self) -> None:
+        """Prossimo tap sulla mappa imposta le coordinate di casa."""
+        self._mode_imposta_casa = True
+        self.page.show_dialog(
+            ft.SnackBar(content=ft.Text(MSG_IMPOSTA_CASA), duration=4000)
+        )
+        self.page.update()
+
+    def _notifica_percorso_visibile(self) -> None:
+        visibile = bool(self.livello_percorso.polylines)
+        if self.on_percorso_visibile is not None:
+            self.on_percorso_visibile(visibile)
+
+    def mostra_percorso(self, route: RouteResult | None) -> None:
+        """Disegna (o rimuove) la polilinea del percorso sulla mappa."""
+        self._route_corrente = route
+        if route is None or len(route.coordinate) < 2:
+            self.livello_percorso.polylines = []
+        else:
+            self.livello_percorso.polylines = [
+                PolylineMarker(
+                    coordinates=[
+                        MapLatitudeLongitude(lat, lon) for lat, lon in route.coordinate
+                    ],
+                    color=POLYLINE_COLORE,
+                    stroke_width=POLYLINE_SPESSORE,
+                    border_stroke_width=1.5,
+                    border_color=ft.Colors.WHITE,
+                )
+            ]
+        self._notifica_percorso_visibile()
+
+    def nascondi_percorso(self) -> None:
+        self.mostra_percorso(None)
+        self.page.update()
+
+    async def _fetch_route(self, lat: float, lon: float) -> RouteResult:
+        profilo = self.get_profilo()
+        casa_lat, casa_lon = self.get_casa()
+        return await asyncio.to_thread(
+            calcola_percorso,
+            lat,
+            lon,
+            lat_orig=casa_lat,
+            lon_orig=casa_lon,
+            profilo=profilo,
+        )
+
     async def seleziona_scuola(self, scuola: dict | pd.Series) -> None:
-        """Centra la mappa sulla scuola e apre il dialog (usato dalla mini-lista)."""
+        """Centra la mappa e apre il dialog (senza chiamare il routing)."""
         if isinstance(scuola, pd.Series):
             scuola = scuola.to_dict()
 
@@ -190,8 +271,39 @@ class MappaController:
             zoom=MAPPA_ZOOM_DETTAGLIO,
         )
         self.mostra_scuola(scuola)
+        self.page.update()
 
-    def mostra_scuola(self, scuola: dict | pd.Series) -> None:
+    async def calcola_percorso_scuola(self, scuola: dict) -> None:
+        """On-demand: calcola OSRM, disegna la traccia e lascia la mappa libera."""
+        lat = float(scuola["Latitudine"])
+        lon = float(scuola["Longitudine"])
+        route = await self._fetch_route(lat, lon)
+        self.mostra_percorso(route)
+
+        label_prof = _PROFILO_LABEL.get(route.profilo, route.profilo)
+        if route.sorgente == "osrm":
+            suffix = " (durata stimata)" if route.durata_stimata else ""
+            msg = (
+                f"Percorso ({label_prof}): {format_distanza(route.distanza_m)}"
+                f" · {format_durata(route.durata_s)}{suffix}"
+            )
+        else:
+            msg = (
+                f"Routing non disponibile — stima "
+                f"{format_distanza(route.distanza_m)} · ~{format_durata(route.durata_s)}"
+            )
+
+        self.page.show_dialog(
+            ft.SnackBar(content=ft.Text(msg, max_lines=2), duration=4500)
+        )
+        self.page.update()
+
+    def mostra_scuola(
+        self,
+        scuola: dict | pd.Series,
+        *,
+        route: RouteResult | None = None,
+    ) -> None:
         if isinstance(scuola, pd.Series):
             scuola = scuola.to_dict()
 
@@ -201,9 +313,12 @@ class MappaController:
         nome = str(scuola.get("Nome", "") or "")
         lat = float(scuola["Latitudine"])
         lon = float(scuola["Longitudine"])
-        distanza_m = scuola.get("Distanza_m")
-        if distanza_m is None or (isinstance(distanza_m, float) and pd.isna(distanza_m)):
-            distanza_m = distanza_metri(CASA_LAT, CASA_LON, lat, lon)
+        distanza_aria = scuola.get("Distanza_m")
+        if distanza_aria is None or (
+            isinstance(distanza_aria, float) and pd.isna(distanza_aria)
+        ):
+            casa_lat, casa_lon = self.get_casa()
+            distanza_aria = distanza_metri(casa_lat, casa_lon, lat, lon)
 
         async def centra(_e=None):
             await self.mappa.move_to(
@@ -222,19 +337,63 @@ class MappaController:
             url = f"https://www.google.com/maps?q={lat},{lon}"
             await ft.UrlLauncher().launch_url(url)
 
-        async def apri_indicazioni(_e=None):
+        async def apri_indicazioni_google(_e=None):
+            casa_lat, casa_lon = self.get_casa()
             url = (
                 "https://www.google.com/maps/dir/?api=1"
-                f"&origin={CASA_LAT},{CASA_LON}"
+                f"&origin={casa_lat},{casa_lon}"
                 f"&destination={lat},{lon}"
             )
             await ft.UrlLauncher().launch_url(url)
 
+        async def mostra_percorso_mappa(_e=None):
+            self._chiudi_dialog()
+            await self.calcola_percorso_scuola(scuola)
+
+        def nascondi(_e=None):
+            self.nascondi_percorso()
+            self._chiudi_dialog()
+
+        meta_percorso: list[ft.Control] = [
+            ft.Text(
+                f"Linea d'aria: {format_distanza(float(distanza_aria))}",
+                size=12,
+                color=UI_META_COLOR,
+            ),
+        ]
+        if route is not None:
+            label_prof = _PROFILO_LABEL.get(route.profilo, route.profilo)
+            if route.sorgente == "osrm":
+                suffix = " (durata stimata)" if route.durata_stimata else ""
+                meta_percorso.append(
+                    ft.Text(
+                        f"Percorso ({label_prof}): {format_distanza(route.distanza_m)}"
+                        f" · {format_durata(route.durata_s)}{suffix}",
+                        size=13,
+                        weight=ft.FontWeight.W_500,
+                    )
+                )
+            else:
+                meta_percorso.append(
+                    ft.Text(
+                        f"Percorso non disponibile — stima linea d'aria "
+                        f"({format_distanza(route.distanza_m)}, ~{format_durata(route.durata_s)})",
+                        size=12,
+                        color=ft.Colors.ORANGE_800,
+                    )
+                )
+
         dialog = ft.AlertDialog(
-            title=ft.Text(nome, size=18, weight=ft.FontWeight.BOLD),
+            modal=True,
+            scrollable=False,
+            title=ft.Text(nome, size=16, weight=ft.FontWeight.BOLD),
+            title_padding=ft.Padding.only(left=20, right=20, top=16, bottom=8),
+            content_padding=ft.Padding.symmetric(horizontal=20, vertical=8),
+            actions_padding=ft.Padding.only(left=8, right=8, bottom=8),
+            inset_padding=ft.Padding.symmetric(horizontal=24, vertical=24),
             content=ft.Column(
                 [
-                    ft.Text(indirizzo, size=13, color=UI_META_COLOR),
+                    ft.Text(indirizzo, size=12, color=UI_META_COLOR),
                     ft.Row(
                         [
                             ft.Text("Distretto", size=12, color=UI_META_COLOR),
@@ -255,7 +414,7 @@ class MappaController:
                     ),
                     ft.Text(
                         f"Grado: {scuola.get('Grado', '')}",
-                        size=13,
+                        size=12,
                         color=UI_META_COLOR,
                     ),
                     ft.Text(
@@ -263,21 +422,19 @@ class MappaController:
                         size=12,
                         color=UI_META_COLOR,
                     ),
-                    ft.Text(
-                        f"Distanza da casa: {format_distanza(float(distanza_m))}",
-                        size=13,
-                        color=UI_META_COLOR,
-                    ),
+                    *meta_percorso,
                 ],
                 tight=True,
-                spacing=8,
-                width=360,
+                spacing=6,
+                width=320,
             ),
             actions=[
-                ft.TextButton("Centra sulla mappa", on_click=centra),
-                ft.TextButton("Indicazioni", on_click=apri_indicazioni),
-                ft.TextButton("Apri in Google Maps", on_click=apri_google_maps),
-                ft.TextButton("Copia indirizzo", on_click=copia_indirizzo),
+                ft.TextButton("Centra", on_click=centra),
+                ft.TextButton("Mostra percorso", on_click=mostra_percorso_mappa),
+                ft.TextButton("Nascondi traccia", on_click=nascondi),
+                ft.TextButton("Indicazioni Google", on_click=apri_indicazioni_google),
+                ft.TextButton("Maps", on_click=apri_google_maps),
+                ft.TextButton("Copia", on_click=copia_indirizzo),
                 ft.TextButton("Chiudi", on_click=lambda e: self._chiudi_dialog()),
             ],
         )
@@ -315,10 +472,35 @@ class MappaController:
     def _on_tap(self, e) -> None:
         if e.coordinates is None:
             return
-        scuola = self._scuola_vicina(e.coordinates.latitude, e.coordinates.longitude)
+        lat = e.coordinates.latitude
+        lon = e.coordinates.longitude
+
+        if self._mode_imposta_casa:
+            self._mode_imposta_casa = False
+            if self.on_casa_impostata is not None:
+                self.on_casa_impostata(lat, lon)
+            self.page.show_dialog(
+                ft.SnackBar(content=ft.Text(MSG_CASA_IMPOSTATA), duration=3000)
+            )
+            return
+
+        scuola = self._scuola_vicina(lat, lon)
         if scuola is not None:
-            self.mostra_scuola(scuola)
+            self.page.run_task(self.seleziona_scuola, scuola)
 
 
-def crea_mappa(page: ft.Page) -> MappaController:
-    return MappaController(page)
+def crea_mappa(
+    page: ft.Page,
+    *,
+    get_profilo: Callable[[], str] | None = None,
+    get_casa: Callable[[], tuple[float, float]] | None = None,
+    on_casa_impostata: Callable[[float, float], None] | None = None,
+    on_percorso_visibile: Callable[[bool], None] | None = None,
+) -> MappaController:
+    return MappaController(
+        page,
+        get_profilo=get_profilo,
+        get_casa=get_casa,
+        on_casa_impostata=on_casa_impostata,
+        on_percorso_visibile=on_percorso_visibile,
+    )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlencode
 
+from utils.config import CASA_LAT, CASA_LON
 from utils.state import FilterState
 
 
@@ -38,6 +39,15 @@ def encode_filtri(
 
     if not state.ordina_per_distanza:
         params["ord"] = "0"
+
+    if state.profilo_routing and state.profilo_routing != "foot":
+        params["modo"] = state.profilo_routing
+
+    if (
+        abs(state.casa_lat - CASA_LAT) > 1e-5
+        or abs(state.casa_lon - CASA_LON) > 1e-5
+    ):
+        params["home"] = f"{state.casa_lat:.5f},{state.casa_lon:.5f}"
 
     if scuola_codice:
         params["scuola"] = scuola_codice
@@ -89,7 +99,20 @@ def decode_filtri(
     testo = data.get("q", "") or ""
     mostra_casa = data.get("casa", "1") != "0"
     ordina = data.get("ord", "1") != "0"
+    profilo = data.get("modo", "foot") or "foot"
+    if profilo not in ("foot", "bike", "car"):
+        profilo = "foot"
     scuola = (data.get("scuola") or "").strip() or None
+
+    casa_lat, casa_lon = CASA_LAT, CASA_LON
+    home = (data.get("home") or "").strip()
+    if home and "," in home:
+        try:
+            parts = home.split(",", 1)
+            casa_lat = float(parts[0])
+            casa_lon = float(parts[1])
+        except ValueError:
+            pass
 
     state = FilterState(
         gradi=gradi,
@@ -97,5 +120,8 @@ def decode_filtri(
         testo=testo,
         mostra_casa=mostra_casa,
         ordina_per_distanza=ordina,
+        profilo_routing=profilo,
+        casa_lat=casa_lat,
+        casa_lon=casa_lon,
     )
     return state, scuola

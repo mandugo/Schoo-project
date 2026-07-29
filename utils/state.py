@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from utils.config import CASA_LAT, CASA_LON
+
 
 OnChange = Callable[[], None]
 
@@ -16,6 +18,9 @@ class FilterState:
     testo: str = ""
     mostra_casa: bool = True
     ordina_per_distanza: bool = True
+    profilo_routing: str = "foot"
+    casa_lat: float = CASA_LAT
+    casa_lon: float = CASA_LON
     _on_change: OnChange | None = field(default=None, repr=False, compare=False)
 
     def set_on_change(self, callback: OnChange | None) -> None:
@@ -49,6 +54,26 @@ class FilterState:
         self.ordina_per_distanza = bool(value)
         if notify:
             self.notify()
+
+    def set_profilo_routing(self, value: str, *, notify: bool = True) -> None:
+        self.profilo_routing = value or "foot"
+        if notify:
+            self.notify()
+
+    def set_casa(
+        self,
+        lat: float,
+        lon: float,
+        *,
+        notify: bool = True,
+    ) -> None:
+        self.casa_lat = float(lat)
+        self.casa_lon = float(lon)
+        if notify:
+            self.notify()
+
+    def ripristina_casa_default(self, *, notify: bool = True) -> None:
+        self.set_casa(CASA_LAT, CASA_LON, notify=notify)
 
     def toggle_grado(self, grado: str, selected: bool) -> None:
         if selected:
